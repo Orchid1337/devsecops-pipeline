@@ -1,0 +1,381 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/devsecops-api
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 1: Lint
+  # ─────────────────────────────────────────────────────────────────────────────
+  lint:
+    name: "Lint (Ruff + Hadolint)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ruff
+        run: pip install ruff==0.8.6
+
+      - name: Run Ruff linter
+        run: ruff check . --output-format=github
+
+      - name: Run Ruff formatter check
+        run: ruff format --check .
+
+      - name: Lint Dockerfile with Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 2: Unit Tests
+  # ─────────────────────────────────────────────────────────────────────────────
+  test:
+    name: "Unit Tests (pytest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    needs: [lint]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests with coverage
+        run: |
+          pytest app/tests/ \
+            --cov=app \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml \
+            -v
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 14
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results.xml
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 3: SAST (Semgrep)
+  # ─────────────────────────────────────────────────────────────────────────────
+  sast:
+    name: "SAST (Semgrep)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    needs: [lint]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/python
+            p/owasp-top-ten
+            .semgrep/custom-rules.yml
+        env:
+          SEMGREP_RULES: "p/python p/owasp-top-ten .semgrep/custom-rules.yml"
+
+      - name: Semgrep SARIF scan
+        run: |
+          pip install semgrep
+          semgrep scan \
+            --config p/python \
+            --config p/owasp-top-ten \
+            --config .semgrep/custom-rules.yml \
+            --sarif \
+            --output semgrep-results.sarif \
+            --severity ERROR \
+            . || true
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep-results.sarif
+          category: semgrep
+        continue-on-error: false
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 3b: SonarQube (parallel with SAST)
+  # ─────────────────────────────────────────────────────────────────────────────
+  sonarqube:
+    name: "SonarQube Analysis"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    needs: [test]
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: SonarQube Quality Gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 4: Dependency Scan (OWASP Dependency-Check)
+  # ─────────────────────────────────────────────────────────────────────────────
+  dependency-scan:
+    name: "Dependency Scan (OWASP)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    needs: [lint]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: "devsecops-api"
+          path: "."
+          format: "HTML,JSON"
+          args: >-
+            --failOnCVSS 7
+            --enableRetired
+
+      - name: Upload Dependency-Check report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: reports/
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 5: Container Scan (Trivy)
+  # ─────────────────────────────────────────────────────────────────────────────
+  container-scan:
+    name: "Container Scan (Trivy)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    needs: [test, sast, dependency-scan]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:scan
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+      - name: Upload Trivy SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+        continue-on-error: false
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 6: Build & Push to GHCR
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-push:
+    name: "Build & Push (GHCR)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    needs: [container-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 7: Deploy to Kind cluster
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: "Deploy (Kind)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    needs: [build-push]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: devsecops-test
+
+      - name: Load image into Kind
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          kind load docker-image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest --name devsecops-test
+
+      - name: Deploy to Kind
+        run: |
+          # Update image reference in deployment
+          sed -i "s|ghcr.io/orchid1337/devsecops-api:latest|${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest|g" k8s/deployment.yaml
+
+          kubectl apply -f k8s/network-policy.yaml
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/devsecops-api --timeout=120s
+          kubectl get pods -l app=devsecops-api
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage 8: Smoke Tests
+  # ─────────────────────────────────────────────────────────────────────────────
+  smoke-tests:
+    name: "Smoke Tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    needs: [deploy]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install httpx
+
+      - name: Port-forward service
+        run: |
+          kubectl port-forward svc/devsecops-api 8080:80 &
+          sleep 5
+
+      - name: Curl health check
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Health check failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "Health check passed: HTTP $HTTP_CODE"
+
+      - name: Run smoke test script
+        run: python scripts/smoke_test.py

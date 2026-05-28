@@ -1,0 +1,12 @@
+# Hadolint configuration
+# https://github.com/hadolint/hadolint
+
+ignored:
+  # We use pip install without --no-cache-dir in builder stage intentionally
+  - DL3042
+
+trustedRegistries:
+  - docker.io
+  - ghcr.io
+
+failure-threshold: warning

@@ -1,0 +1,64 @@
+rules:
+  - id: hardcoded-secret-pattern
+    patterns:
+      - pattern-either:
+          - pattern: $VAR = "..."
+          - pattern: $VAR = '...'
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)(password|secret|api_key|apikey|token|private_key|auth_token|access_key|secret_key)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: "^(?!.*\\b(test|mock|fake|dummy|example|placeholder)\\b).*$"
+    message: >-
+      Potential hardcoded secret detected in variable '$VAR'.
+      Secrets should be loaded from environment variables or a secrets manager,
+      never committed to source control.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      technology: [python]
+      cwe:
+        - "CWE-798: Use of Hard-coded Credentials"
+      owasp:
+        - A07:2021 - Identification and Authentication Failures
+      confidence: MEDIUM
+
+  - id: sql-injection-format-string
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $CURSOR.execute(f"...", ...)
+          - pattern: |
+              $CURSOR.execute("..." % ..., ...)
+          - pattern: |
+              $CURSOR.execute("...".format(...), ...)
+    message: >-
+      Possible SQL injection via string formatting. Use parameterized queries
+      instead of f-strings, %-formatting, or .format() in SQL statements.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      technology: [python]
+      cwe:
+        - "CWE-89: SQL Injection"
+      owasp:
+        - A03:2021 - Injection
+      confidence: HIGH
+
+  - id: insecure-yaml-load
+    pattern: yaml.load($DATA)
+    fix: yaml.safe_load($DATA)
+    message: >-
+      Use yaml.safe_load() instead of yaml.load() to prevent arbitrary code
+      execution via YAML deserialization attacks.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      technology: [python]
+      cwe:
+        - "CWE-502: Deserialization of Untrusted Data"
+      confidence: HIGH

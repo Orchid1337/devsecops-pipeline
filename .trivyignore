@@ -1,0 +1,9 @@
+# Trivy Ignore File
+# Each entry documents why a specific CVE is accepted.
+# Review this file quarterly and remove entries that have been patched.
+#
+# Format: CVE-ID  # Reason for acceptance | Reviewed: YYYY-MM-DD | Reviewer: name
+
+# Example entries (uncomment and replace with actual CVEs if needed):
+# CVE-2023-44487  # HTTP/2 rapid reset - mitigated by rate limiting at ingress | Reviewed: 2024-01-15 | Reviewer: security-team
+# CVE-2023-39325  # Go net/http2 - not exploitable in our configuration, no HTTP/2 exposed | Reviewed: 2024-02-01 | Reviewer: security-team

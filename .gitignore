@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Testing
+htmlcov/
+.coverage
+coverage.xml
+test-results.xml
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+*.pem
+*.key
+
+# Docker
+docker-compose.override.yml
+
+# SonarQube
+.scannerwork/
+
+# Secrets baseline
+.secrets.baseline

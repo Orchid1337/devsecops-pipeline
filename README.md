@@ -5,11 +5,11 @@
 [![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)](https://github.com/Orchid1337/devsecops-pipeline/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A fully automated CI/CD pipeline with security scanning integrated at every stage. The application is a simple FastAPI REST API — the real focus here is the pipeline itself and how security tooling fits into a modern delivery workflow.
+End-to-end CI/CD pipeline with security scanning at every stage. The app itself is a simple FastAPI REST API — the focus is the pipeline and security tooling around it.
 
-Every commit triggers 8 pipeline stages. If any security gate fails, nothing gets deployed. No manual overrides, no skipping scans.
+Every push triggers 8 pipeline stages. If any security gate fails, nothing gets deployed.
 
-## How the Pipeline Works
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -31,8 +31,7 @@ flowchart LR
 
     subgraph "Deployment"
         G --> H[Build & Push]
-        H --> I[Deploy to K8s]
-        I --> J[Smoke Tests]
+        H --> I[Deploy to K8s + Smoke Tests]
     end
 
     style D fill:#c0392b,color:#fff
@@ -41,65 +40,48 @@ flowchart LR
     style E fill:#c0392b,color:#fff
 ```
 
-### Pipeline Stages
+## Pipeline Stages
 
-| # | Stage | Tool | What happens | Blocks deploy if |
-|---|-------|------|-------------|-----------------|
-| 1 | Lint | Ruff + Hadolint | Checks Python code style and Dockerfile best practices | Any warning |
-| 2 | Tests | pytest | Runs 16 unit tests, generates coverage report (93%) | Any test fails |
-| 3 | SAST | Semgrep | Static analysis for injections, secrets, OWASP Top 10 | HIGH severity finding |
-| 4 | Quality | SonarQube | Code quality, duplication, security hotspots | Quality Gate fails |
-| 5 | Dependencies | OWASP Dep-Check | Scans all packages for known CVEs | CVSS score ≥ 7 |
-| 6 | Container | Trivy | Scans built Docker image for vulnerabilities | CRITICAL vuln found |
-| 7 | Build | Docker + GHCR | Builds image, tags with SHA, pushes to registry | Build failure |
-| 8 | Deploy | Kind + kubectl | Deploys to Kubernetes, runs smoke tests | Any endpoint down |
+| # | Stage | Tool | Blocks deploy if |
+|---|-------|------|-----------------|
+| 1 | Lint | Ruff + Hadolint | Any code style or Dockerfile issue |
+| 2 | Tests | pytest (16 tests, 93% coverage) | Any test fails |
+| 3 | SAST | Semgrep (OWASP Top 10 + custom rules) | HIGH+ severity finding |
+| 4 | Quality | SonarQube | Quality Gate fails (PR only) |
+| 5 | Dependencies | OWASP Dependency-Check | CVSS ≥ 7 |
+| 6 | Container | Trivy | CRITICAL/HIGH in Python libraries |
+| 7 | Build | Docker + GHCR | Build failure |
+| 8 | Deploy | Kind + kubectl + smoke tests | Any endpoint unreachable |
 
-## The Application
+## Security Controls
 
-A REST API with basic CRUD operations. Intentionally simple — it exists to give the pipeline something real to scan and deploy.
+| Tool | What it catches |
+|------|----------------|
+| **Ruff** | Code quality, potential bugs, unsafe patterns |
+| **Hadolint** | Dockerfile misconfigs (running as root, missing flags) |
+| **Semgrep** | SQL injection, hardcoded secrets, unsafe deserialization |
+| **SonarQube** | Code smells, security hotspots, duplication |
+| **OWASP Dep-Check** | Known CVEs in pinned dependencies |
+| **Trivy** | Vulnerabilities in container image layers |
+| **detect-secrets** | Accidentally committed API keys/tokens |
+| **K8s Network Policies** | Lateral movement between pods |
+| **Security Context** | Container escape, privilege escalation |
 
-**Endpoints:**
-- `GET /health` — liveness probe for Kubernetes
-- `GET /ready` — readiness probe
-- `GET/POST /api/v1/users/` — list and create users
-- `GET/DELETE /api/v1/users/{id}` — get or remove a user
-- `GET/POST /api/v1/items/` — list and create items
-- `GET/PUT/DELETE /api/v1/items/{id}` — get, update, or remove an item
-
-**Security features in the app itself:**
-- Input validation via Pydantic (email format, username charset, price bounds)
-- XSS character stripping on item names
-- Restrictive CORS policy
-- No secrets in code, no debug mode, no stack traces in responses
-
-## Kubernetes Security
-
-The K8s manifests aren't boilerplate — they implement actual hardening:
-
-- **Non-root container** (`runAsUser: 1000`)
-- **Read-only filesystem** (writable `/tmp` via emptyDir)
-- **All capabilities dropped** — zero Linux capabilities
-- **No privilege escalation** — blocks setuid/setgid binaries
-- **No service account token** — pod can't talk to K8s API
-- **Network policies** — default deny-all, explicit allow only from ingress controller
-- **Resource limits** — prevents resource exhaustion
-- **Rolling updates** — zero-downtime deploys with health checks
-
-## Running Locally
+## Quick Start
 
 ```bash
-# With Docker
+# run locally with docker
 docker compose up --build
-# API at http://localhost:8000, Swagger docs at http://localhost:8000/docs
+# API at http://localhost:8000, docs at http://localhost:8000/docs
 
-# Without Docker
+# or without docker
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 
-# Run tests
-pytest app/tests/ -v
+# run tests
+make test
 
-# Run pipeline locally (requires act: https://github.com/nektos/act)
+# run the full pipeline locally (requires act)
 act push -j lint
 act push -j test
 ```
@@ -111,37 +93,66 @@ make lint      # ruff + hadolint
 make test      # pytest with coverage
 make scan      # semgrep + trivy
 make run       # docker compose up
-make deploy    # spin up kind cluster + deploy
+make deploy    # kind cluster + kubectl apply
 make clean     # tear down everything
-make sonarqube # start local SonarQube
 ```
 
-## Security Tools & What They Catch
+## API Endpoints
 
-| Tool | Threat | Example |
-|------|--------|---------|
-| **Semgrep** | Code-level vulnerabilities | SQL injection via f-strings, hardcoded passwords, unsafe YAML loading |
-| **Trivy** | Container vulnerabilities | Outdated OS packages, vulnerable Python libraries in the image |
-| **OWASP Dep-Check** | Supply chain attacks | Known CVEs in pinned dependencies |
-| **Hadolint** | Docker misconfigs | Running as root, using `latest` tag, missing `--no-cache-dir` |
-| **detect-secrets** | Leaked credentials | API keys, tokens, passwords accidentally committed |
-| **Network Policies** | Lateral movement | Compromised pod can't reach other services |
-| **Security Context** | Container escape | Even if RCE achieved, attacker has no capabilities |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Liveness probe |
+| GET | `/ready` | Readiness probe |
+| GET | `/api/v1/users/` | List users |
+| POST | `/api/v1/users/` | Create user (validated email + username) |
+| GET | `/api/v1/users/{id}` | Get user by ID |
+| DELETE | `/api/v1/users/{id}` | Delete user |
+| GET | `/api/v1/items/` | List items |
+| POST | `/api/v1/items/` | Create item (XSS sanitized, price validated) |
+| GET | `/api/v1/items/{id}` | Get item |
+| PUT | `/api/v1/items/{id}` | Update item |
+| DELETE | `/api/v1/items/{id}` | Delete item |
 
-## Custom Semgrep Rule
+## Kubernetes Hardening
 
-I wrote a custom rule (`.semgrep/custom-rules.yml`) that catches hardcoded secrets:
+Not boilerplate — real security controls:
 
-```yaml
-# Catches: password = "actual_secret_here"
-# Ignores: password = "test_placeholder" (has 'test' in value context)
+- `runAsNonRoot` + `runAsUser: 1000` — no root in container
+- `readOnlyRootFilesystem` — can't write to disk (tmpfs for /tmp)
+- `capabilities.drop: [ALL]` — zero Linux capabilities
+- `allowPrivilegeEscalation: false` — blocks setuid
+- `automountServiceAccountToken: false` — no K8s API access from pod
+- Default-deny network policy + explicit allow from ingress only
+- Resource limits (CPU/memory) to prevent exhaustion
+- Rolling update strategy with liveness/readiness probes
+
+## Custom Semgrep Rules
+
+`.semgrep/custom-rules.yml` includes three original rules:
+
+1. **Hardcoded secret detection** — catches `password = "actual_value"` patterns while ignoring test placeholders
+2. **SQL injection via string formatting** — flags f-strings, %-formatting, and `.format()` in SQL queries
+3. **Unsafe YAML loading** — catches `yaml.load()` without `safe_load()`
+
+## Project Layout
+
 ```
-
-It also catches SQL injection via string formatting and unsafe `yaml.load()` calls.
+├── .github/workflows/pipeline.yml   # 8-stage CI/CD pipeline
+├── app/                             # FastAPI app (models, routers, tests)
+├── k8s/                             # deployment, service, ingress, netpol
+├── scripts/smoke_test.py            # post-deploy endpoint validation
+├── .semgrep/custom-rules.yml        # 3 custom security rules
+├── Dockerfile                       # multi-stage, non-root, minimal
+├── docker-compose.yml               # local dev
+├── docker-compose.sonarqube.yml     # local SonarQube
+├── Makefile                         # dev shortcuts
+├── SECURITY.md                      # vulnerability disclosure policy
+└── docs/branch-protection.md        # recommended GitHub settings
+```
 
 ## What I Learned
 
-Security gates only matter if they're mandatory — an optional scan will get skipped the moment there's a deadline. I made every check a hard blocker because fixing a 5-minute lint issue is always cheaper than dealing with a production vulnerability. The hardest part was calibrating thresholds: too strict and you get alert fatigue, too loose and real issues slip through. CVSS ≥ 7 for dependencies and CRITICAL-only for containers ended up being the right balance for this project's risk profile.
+Security gates only work if they're mandatory. I made every scan a hard blocker because optional checks get ignored under deadline pressure. The tricky part was tuning thresholds — CVSS ≥ 7 for dependencies and CRITICAL/HIGH for our own libraries (not OS packages) turned out to be the right balance. I also learned that writing custom Semgrep rules is surprisingly approachable and catches things generic rulesets miss. The biggest practical lesson: each CI job runs on a fresh runner, so things like Kind clusters don't persist between jobs — you have to design your pipeline stages with that isolation in mind.
 
 ## License
 

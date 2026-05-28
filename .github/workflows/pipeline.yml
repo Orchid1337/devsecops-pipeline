@@ -110,26 +110,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run Semgrep
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >-
-            p/python
-            p/owasp-top-ten
-            .semgrep/custom-rules.yml
-        env:
-          SEMGREP_RULES: "p/python p/owasp-top-ten .semgrep/custom-rules.yml"
+      - name: Install Semgrep
+        run: pip install semgrep
 
-      - name: Semgrep SARIF scan
+      - name: Run Semgrep scan
         run: |
-          pip install semgrep
+          semgrep scan \
+            --config p/python \
+            --config p/owasp-top-ten \
+            --config .semgrep/custom-rules.yml \
+            --severity ERROR \
+            --error \
+            .
+
+      - name: Generate SARIF report
+        if: always()
+        run: |
           semgrep scan \
             --config p/python \
             --config p/owasp-top-ten \
             --config .semgrep/custom-rules.yml \
             --sarif \
             --output semgrep-results.sarif \
-            --severity ERROR \
             . || true
 
       - name: Upload SARIF to GitHub Security
@@ -138,7 +140,6 @@ jobs:
         with:
           sarif_file: semgrep-results.sarif
           category: semgrep
-        continue-on-error: false
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Stage 3b: SonarQube (parallel with SAST)
@@ -194,8 +195,9 @@ jobs:
         with:
           project: "devsecops-api"
           path: "."
-          format: "HTML,JSON"
+          format: "HTML"
           args: >-
+            --format JSON
             --failOnCVSS 7
             --enableRetired
 

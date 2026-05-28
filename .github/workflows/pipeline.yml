@@ -9,6 +9,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/devsecops-api
+  IMAGE_TAG_SCAN: devsecops-api-scan
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -233,14 +234,14 @@ jobs:
           context: .
           push: false
           load: true
-          tags: ${{ env.IMAGE_NAME }}:scan
+          tags: devsecops-api:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:scan
+          image-ref: devsecops-api:scan
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
@@ -249,11 +250,10 @@ jobs:
 
       - name: Upload Trivy SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: trivy-results.sarif
           category: trivy
-        continue-on-error: false
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Stage 6: Build & Push to GHCR
@@ -325,13 +325,14 @@ jobs:
 
       - name: Load image into Kind
         run: |
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          kind load docker-image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest --name devsecops-test
+          IMAGE=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" | tr '[:upper:]' '[:lower:]')
+          docker pull $IMAGE
+          kind load docker-image $IMAGE --name devsecops-test
 
       - name: Deploy to Kind
         run: |
-          # Update image reference in deployment
-          sed -i "s|ghcr.io/orchid1337/devsecops-api:latest|${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest|g" k8s/deployment.yaml
+          IMAGE=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" | tr '[:upper:]' '[:lower:]')
+          sed -i "s|ghcr.io/orchid1337/devsecops-api:latest|$IMAGE|g" k8s/deployment.yaml
 
           kubectl apply -f k8s/network-policy.yaml
           kubectl apply -f k8s/deployment.yaml

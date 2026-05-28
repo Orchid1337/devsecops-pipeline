@@ -15,11 +15,14 @@ def clean_slate():
 
 
 def test_create_item():
-    resp = client.post("/api/v1/items/", json={
-        "name": "Mechanical Keyboard",
-        "description": "Cherry MX Brown switches",
-        "price": 149.99,
-    })
+    resp = client.post(
+        "/api/v1/items/",
+        json={
+            "name": "Mechanical Keyboard",
+            "description": "Cherry MX Brown switches",
+            "price": 149.99,
+        },
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["name"] == "Mechanical Keyboard"
@@ -28,10 +31,13 @@ def test_create_item():
 
 
 def test_xss_gets_stripped():
-    resp = client.post("/api/v1/items/", json={
-        "name": "<script>alert('xss')</script>Keyboard",
-        "price": 50.0,
-    })
+    resp = client.post(
+        "/api/v1/items/",
+        json={
+            "name": "<script>alert('xss')</script>Keyboard",
+            "price": 50.0,
+        },
+    )
     assert resp.status_code == 201
     # angle brackets and quotes should be gone
     assert "<script>" not in resp.json()["name"]

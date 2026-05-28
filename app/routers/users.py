@@ -28,9 +28,11 @@ async def create_user(user: UserCreate):
     # Uniqueness check
     for existing in _users_db.values():
         if existing.username == user.username:
-            raise HTTPException(status.HTTP_409_CONFLICT, f"Username '{user.username}' already taken")
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, f"Username '{user.username}' already taken"
+            )
         if existing.email == user.email:
-            raise HTTPException(status.HTTP_409_CONFLICT, f"Email already registered")
+            raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 
     new_user = UserResponse(id=_next_id, **user.model_dump())
     _users_db[_next_id] = new_user

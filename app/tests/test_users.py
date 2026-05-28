@@ -15,10 +15,13 @@ def clean_slate():
 
 
 def test_create_user():
-    resp = client.post("/api/v1/users/", json={
-        "username": "testuser01",
-        "email": "user01@example.com",
-    })
+    resp = client.post(
+        "/api/v1/users/",
+        json={
+            "username": "testuser01",
+            "email": "user01@example.com",
+        },
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["username"] == "testuser01"
@@ -27,10 +30,13 @@ def test_create_user():
 
 
 def test_bad_email_gets_422():
-    resp = client.post("/api/v1/users/", json={
-        "username": "someone",
-        "email": "this-is-not-email",
-    })
+    resp = client.post(
+        "/api/v1/users/",
+        json={
+            "username": "someone",
+            "email": "this-is-not-email",
+        },
+    )
     assert resp.status_code == 422
 
 
@@ -52,10 +58,13 @@ def test_nonexistent_user_404():
 
 
 def test_delete_works():
-    create = client.post("/api/v1/users/", json={
-        "username": "byebye",
-        "email": "bye@example.com",
-    })
+    create = client.post(
+        "/api/v1/users/",
+        json={
+            "username": "byebye",
+            "email": "bye@example.com",
+        },
+    )
     uid = create.json()["id"]
     resp = client.delete(f"/api/v1/users/{uid}")
     assert resp.status_code == 204

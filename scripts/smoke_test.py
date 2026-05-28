@@ -3,7 +3,9 @@
 Post-deploy smoke tests. Hits every endpoint and checks we get expected status codes.
 Run this after deploying to the Kind cluster (or locally against localhost:8080).
 """
+
 import sys
+
 import httpx
 
 BASE_URL = "http://localhost:8080"

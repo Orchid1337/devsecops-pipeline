@@ -2,8 +2,8 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # --- Health ---
+
 
 class HealthResponse(BaseModel):
     status: str = "healthy"
@@ -11,6 +11,7 @@ class HealthResponse(BaseModel):
 
 
 # --- Users ---
+
 
 class UserBase(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
@@ -40,6 +41,7 @@ class UserResponse(UserBase):
 
 
 # --- Items ---
+
 
 class ItemBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)

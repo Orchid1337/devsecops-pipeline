@@ -245,8 +245,19 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL
+          exit-code: "0"
+          trivyignores: .trivyignore
+
+      - name: Trivy table output (for logs)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: devsecops-api:scan
+          format: table
+          severity: CRITICAL,HIGH
           exit-code: "1"
           trivyignores: .trivyignore
+          vuln-type: library
+          scanners: vuln
 
       - name: Upload Trivy SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3

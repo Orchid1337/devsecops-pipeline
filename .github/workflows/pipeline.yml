@@ -355,21 +355,7 @@ jobs:
           kubectl rollout status deployment/devsecops-api --timeout=120s
           kubectl get pods -l app=devsecops-api
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Stage 8: Smoke Tests
-  # ─────────────────────────────────────────────────────────────────────────────
-  smoke-tests:
-    name: "Smoke Tests"
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    needs: [deploy]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
+      - name: Set up Python for smoke tests
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
